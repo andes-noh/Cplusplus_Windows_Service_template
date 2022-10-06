@@ -1,20 +1,217 @@
-﻿// cplusplus_windows_service_template.cpp : 이 파일에는 'main' 함수가 포함됩니다. 거기서 프로그램 실행이 시작되고 종료됩니다.
-//
+﻿#include <Windows.h>
+#include <tchar.h>
+#include <string>
+#include <cstdio>
 
-#include <iostream>
 
-int main()
-{
-    std::cout << "Hello World!\n";
+SERVICE_STATUS        g_ServiceStatus = { 0 };
+SERVICE_STATUS_HANDLE g_StatusHandle = NULL;
+HANDLE                g_ServiceStopEvent = INVALID_HANDLE_VALUE;
+
+VOID WINAPI ServiceMain(DWORD argc, LPTSTR *argv);
+VOID WINAPI ServiceCtrlHandler(DWORD);
+DWORD WINAPI ServiceWorkerThread(LPVOID lpParam);
+
+#define SERVICE_NAME  _T("My Sample Service")
+
+
+using namespace std;
+
+void write_txt_file(string file_name, string input) {
+	/*
+	write a string to a specific txt file
+	*/
+	FILE *f = fopen(file_name.c_str(), "a+");
+	fprintf(f, "%s\n", input.c_str());
+	fclose(f);
 }
 
-// 프로그램 실행: <Ctrl+F5> 또는 [디버그] > [디버깅하지 않고 시작] 메뉴
-// 프로그램 디버그: <F5> 키 또는 [디버그] > [디버깅 시작] 메뉴
 
-// 시작을 위한 팁: 
-//   1. [솔루션 탐색기] 창을 사용하여 파일을 추가/관리합니다.
-//   2. [팀 탐색기] 창을 사용하여 소스 제어에 연결합니다.
-//   3. [출력] 창을 사용하여 빌드 출력 및 기타 메시지를 확인합니다.
-//   4. [오류 목록] 창을 사용하여 오류를 봅니다.
-//   5. [프로젝트] > [새 항목 추가]로 이동하여 새 코드 파일을 만들거나, [프로젝트] > [기존 항목 추가]로 이동하여 기존 코드 파일을 프로젝트에 추가합니다.
-//   6. 나중에 이 프로젝트를 다시 열려면 [파일] > [열기] > [프로젝트]로 이동하고 .sln 파일을 선택합니다.
+int _tmain(int argc, TCHAR *argv[])
+{
+	OutputDebugString(_T("My Sample Service: Main: Entry"));
+
+	string text = "My Sample Service";
+	wchar_t wtext[20];
+	mbstowcs(wtext, text.c_str(), text.length());//includes null
+	LPWSTR ptr = wtext;
+
+	SERVICE_TABLE_ENTRY ServiceTable[] =
+	{
+		{ptr, (LPSERVICE_MAIN_FUNCTION)ServiceMain},
+		{NULL, NULL}
+	};
+
+	if (StartServiceCtrlDispatcher(ServiceTable) == FALSE)
+	{
+		OutputDebugString(_T("My Sample Service: Main: StartServiceCtrlDispatcher returned error"));
+		return GetLastError();
+	}
+
+	OutputDebugString(_T("My Sample Service: Main: Exit"));
+	return 0;
+}
+
+
+VOID WINAPI ServiceMain(DWORD argc, LPTSTR *argv)
+{
+	DWORD Status = E_FAIL;
+
+	OutputDebugString(_T("My Sample Service: ServiceMain: Entry"));
+
+	g_StatusHandle = RegisterServiceCtrlHandler(SERVICE_NAME, ServiceCtrlHandler);
+
+	if (g_StatusHandle == NULL)
+	{
+		OutputDebugString(_T("My Sample Service: ServiceMain: RegisterServiceCtrlHandler returned error"));
+		/*goto EXIT;*/
+		OutputDebugString(_T("My Sample Service: ServiceMain: Exit"));
+		return;
+	}
+
+	// Tell the service controller we are starting
+	ZeroMemory(&g_ServiceStatus, sizeof(g_ServiceStatus));
+	g_ServiceStatus.dwServiceType = SERVICE_WIN32_OWN_PROCESS;
+	g_ServiceStatus.dwControlsAccepted = 0;
+	g_ServiceStatus.dwCurrentState = SERVICE_START_PENDING;
+	g_ServiceStatus.dwWin32ExitCode = 0;
+	g_ServiceStatus.dwServiceSpecificExitCode = 0;
+	g_ServiceStatus.dwCheckPoint = 0;
+
+	if (SetServiceStatus(g_StatusHandle, &g_ServiceStatus) == FALSE)
+	{
+		OutputDebugString(_T("My Sample Service: ServiceMain: SetServiceStatus returned error"));
+	}
+
+	/*
+	 * Perform tasks neccesary to start the service here
+	 */
+	OutputDebugString(_T("My Sample Service: ServiceMain: Performing Service Start Operations"));
+
+	// Create stop event to wait on later.
+	g_ServiceStopEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+	if (g_ServiceStopEvent == NULL)
+	{
+		OutputDebugString(_T("My Sample Service: ServiceMain: CreateEvent(g_ServiceStopEvent) returned error"));
+
+		g_ServiceStatus.dwControlsAccepted = 0;
+		g_ServiceStatus.dwCurrentState = SERVICE_STOPPED;
+		g_ServiceStatus.dwWin32ExitCode = GetLastError();
+		g_ServiceStatus.dwCheckPoint = 1;
+
+		if (SetServiceStatus(g_StatusHandle, &g_ServiceStatus) == FALSE)
+		{
+			OutputDebugString(_T("My Sample Service: ServiceMain: SetServiceStatus returned error"));
+		}
+		/*goto EXIT;*/
+		OutputDebugString(_T("My Sample Service: ServiceMain: Exit"));
+		return;
+	}
+
+	// Tell the service controller we are started
+	g_ServiceStatus.dwControlsAccepted = SERVICE_ACCEPT_STOP;
+	g_ServiceStatus.dwCurrentState = SERVICE_RUNNING;
+	g_ServiceStatus.dwWin32ExitCode = 0;
+	g_ServiceStatus.dwCheckPoint = 0;
+
+	if (SetServiceStatus(g_StatusHandle, &g_ServiceStatus) == FALSE)
+	{
+		OutputDebugString(_T("My Sample Service: ServiceMain: SetServiceStatus returned error"));
+	}
+
+	// Start the thread that will perform the main task of the service
+	HANDLE hThread = CreateThread(NULL, 0, ServiceWorkerThread, NULL, 0, NULL);
+
+	OutputDebugString(_T("My Sample Service: ServiceMain: Waiting for Worker Thread to complete"));
+
+	// Wait until our worker thread exits effectively signaling that the service needs to stop
+	WaitForSingleObject(hThread, INFINITE);
+
+	OutputDebugString(_T("My Sample Service: ServiceMain: Worker Thread Stop Event signaled"));
+
+
+	/*
+	 * Perform any cleanup tasks
+	 */
+	OutputDebugString(_T("My Sample Service: ServiceMain: Performing Cleanup Operations"));
+
+	CloseHandle(g_ServiceStopEvent);
+
+	g_ServiceStatus.dwControlsAccepted = 0;
+	g_ServiceStatus.dwCurrentState = SERVICE_STOPPED;
+	g_ServiceStatus.dwWin32ExitCode = 0;
+	g_ServiceStatus.dwCheckPoint = 3;
+
+	if (SetServiceStatus(g_StatusHandle, &g_ServiceStatus) == FALSE)
+	{
+		OutputDebugString(_T("My Sample Service: ServiceMain: SetServiceStatus returned error"));
+	}
+
+EXIT:
+	OutputDebugString(_T("My Sample Service: ServiceMain: Exit"));
+
+	return;
+}
+
+
+VOID WINAPI ServiceCtrlHandler(DWORD CtrlCode)
+{
+	OutputDebugString(_T("My Sample Service: ServiceCtrlHandler: Entry"));
+
+	switch (CtrlCode)
+	{
+	case SERVICE_CONTROL_STOP:
+
+		OutputDebugString(_T("My Sample Service: ServiceCtrlHandler: SERVICE_CONTROL_STOP Request"));
+
+		if (g_ServiceStatus.dwCurrentState != SERVICE_RUNNING)
+			break;
+
+		/*
+		 * Perform tasks neccesary to stop the service here
+		 */
+
+		g_ServiceStatus.dwControlsAccepted = 0;
+		g_ServiceStatus.dwCurrentState = SERVICE_STOP_PENDING;
+		g_ServiceStatus.dwWin32ExitCode = 0;
+		g_ServiceStatus.dwCheckPoint = 4;
+
+		if (SetServiceStatus(g_StatusHandle, &g_ServiceStatus) == FALSE)
+		{
+			OutputDebugString(_T("My Sample Service: ServiceCtrlHandler: SetServiceStatus returned error"));
+		}
+
+		// This will signal the worker thread to start shutting down
+		SetEvent(g_ServiceStopEvent);
+
+		break;
+
+	default:
+		break;
+	}
+
+	OutputDebugString(_T("My Sample Service: ServiceCtrlHandler: Exit"));
+}
+
+
+DWORD WINAPI ServiceWorkerThread(LPVOID lpParam)
+{
+	OutputDebugString(_T("My Sample Service: ServiceWorkerThread: Entry"));
+	int i = 0;
+	//  Periodically check if the service has been requested to stop
+	while (WaitForSingleObject(g_ServiceStopEvent, 0) != WAIT_OBJECT_0)
+	{
+		/*
+		 * Perform main service function here
+		 */
+		write_txt_file("C:\\...\\out.txt", "Writing...#" + to_string(i));
+		i++;
+
+		// time sleep
+		Sleep(5000);
+	}
+
+	OutputDebugString(_T("My Sample Service: ServiceWorkerThread: Exit"));
+
+	return ERROR_SUCCESS;
+}
