@@ -17,6 +17,9 @@ DWORD WINAPI ServiceWorkerThread(LPVOID lpParam);
 
 using namespace std;
 
+string gv_str = "";
+int gv_int = 0;
+
 void write_txt_file(string file_name, string input) {
 	/*
 	write a string to a specific txt file
@@ -26,11 +29,45 @@ void write_txt_file(string file_name, string input) {
 	fclose(f);
 }
 
+const string TCHARToString(const TCHAR* ptsz) {
+	int len = wcslen((wchar_t*)ptsz);
+
+	char* psz = new char[2 * len + 1];
+
+	wcstombs(psz, (wchar_t*)ptsz, 2 * len + 1);
+
+	string s = psz;
+
+	delete[] psz;
+
+	return s;
+}
+
+const int TCHARToInt(const TCHAR* ptsz) {
+	int len = wcslen((wchar_t*)ptsz);
+
+	char* psz = new char[2 * len + 1];
+
+	wcstombs(psz, (wchar_t*)ptsz, 2 * len + 1);
+
+	string s = psz;
+
+	int i = stoi(s);
+
+	delete[] psz;
+
+	return i;
+}
+
 
 int _tmain(int argc, TCHAR *argv[])
 {
 	OutputDebugString(_T("My Sample Service: Main: Entry"));
 
+	// argv 
+	// gv_str = TCHARToString(argv[1]);
+	// gv_int = TCHARToInt(argv[2]);
+	
 	string text = "My Sample Service";
 	wchar_t wtext[20];
 	mbstowcs(wtext, text.c_str(), text.length());//includes null
