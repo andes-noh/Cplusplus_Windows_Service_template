@@ -19,4 +19,14 @@ sc.exe create "service name" binpath= "*.exe FilePath" displayname= "display nam
 sc.exe start "service name" 
 ```
 
+- 서비스 중지
+```
+sc.exe stop "service name"
+```
+
+- 서비스 삭제
+```
+sc.exe delete "service name"
+```
+
 
