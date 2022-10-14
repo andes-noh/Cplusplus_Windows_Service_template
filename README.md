@@ -9,5 +9,14 @@
 
 - powershell 관리자 실행
 
+- 서비스 생성 
+```
+sc.exe create "service name" binpath= "*.exe FilePath" displayname= "display name" start= auto
+```
+
+- 서비스 시작
+```
+sc.exe start "service name" 
+```
 
 
