@@ -43,4 +43,4 @@ sc.exe create test binPath= '"*.exe FilePath" argv[1] argv[2]....' displayname= 
 - 
 
 ## 기타 참조 프로젝트
-- 
+- [c# dotnet6.0 서비스 만들기]:(https://github.com/andes-noh/dotent-basic-sample)
